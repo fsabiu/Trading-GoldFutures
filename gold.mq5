@@ -120,7 +120,15 @@ void OnTick() {
                double sl = MathMax(prev_candle_open, entry - max_sl*symbol_info.Point());
                double tp = iClose(symbol, timeframe, 1); // Last candle close
                
-               placeBuyLimit(symbol, size, entry, sl, tp, "");
+               if(countPositions() == 0){
+                  
+                  if(countOrders() > 0){
+                     cancelAllOrders();
+                  }
+                  
+                  placeBuyLimit(symbol, size, entry, sl, tp, "");
+               }
+               
             }
          }
       }
@@ -145,7 +153,14 @@ void OnTick() {
                double sl = MathMin(prev_candle_open, entry + max_sl*symbol_info.Point());
                double tp = iClose(symbol, timeframe, 1); // Last candle close
                
-               placeSellLimit(symbol, size, entry, sl, tp, "");
+               if(countPositions() == 0){
+                  
+                  if(countOrders() > 0){
+                     cancelAllOrders();
+                  }
+                  
+                  placeSellLimit(symbol, size, entry, sl, tp, "");
+               }
             } 
          }
       }
@@ -361,5 +376,56 @@ void setBreakeven() {
             }
       }
    }
+}
+
+
+int countPositions() {
+   int cont = 0;
+   CPositionInfo pos_info;
+   
+   for(int i = PositionsTotal()-1; i >= 0; i--){
+      if(pos_info.SelectByIndex(i) && pos_info.Magic() == magic_number) {
+            cont++;
+      }
+   }
+   
+   return cont;
+}
+
+int countOrders() {
+   int cont =0;
+   COrderInfo ord_info;
+   
+   for(int i=OrdersTotal()-1; i>=0; i--){
+      if(ord_info.SelectByIndex(i) && ord_info.Magic() == magic_number) {
+            cont++;
+       }
+   }
+   
+   return cont;
+}
+
+int cancelAllOrders() {
+   MqlTradeRequest request = {};
+   MqlTradeResult  result = {};
+   
+   request.action = TRADE_ACTION_REMOVE;
+   
+   COrderInfo ord_info;
+   
+   for(int i=OrdersTotal()-1; i>=0; i--){
+      if(ord_info.SelectByIndex(i) && ord_info.Magic() == magic_number) {
+            //int res = OrderDelete(OrderTicket());
+            request.order  = ord_info.Ticket();
+            ResetLastError();
+            if(!OrderSend(request,result)){
+               Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+            } else{
+               Print("Orders deleted");
+            }
+       }
+   }
+   
+   return 0;
 }
 
