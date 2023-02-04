@@ -21,10 +21,11 @@ CTrade  trade;
 
 input int magic_number = 12345; // EA magic number
 input double size = 0.4; // Size
-input int min_volume = 500;
-input int max_candles_distance = 25;
-input int order_expiration_minutes = 30;
+input int min_volume = 300; // Min volume
+input int max_candles_distance = 25; // Max candles distance (mins)
+input int order_expiration_minutes = 30; // Order expiration (mins)
 input int max_sl = 250; // Max SL pips
+input int max_tp = 150; // Max TP pips
 input int min_candle_dist = 5; // Min candle distance (mins)
 input bool breakeven = false;
 
@@ -118,7 +119,7 @@ void OnTick() {
             if(prev_candle_high < last_candle_high) {
                double entry = prev_candle_close;
                double sl = MathMax(prev_candle_open, entry - max_sl*symbol_info.Point());
-               double tp = iClose(symbol, timeframe, 1); // Last candle close
+               double tp = MathMin(last_candle_close, entry + max_tp*symbol_info.Point()); // Last candle close
                
                if(countPositions() == 0){
                   
@@ -151,7 +152,7 @@ void OnTick() {
             
                double entry = prev_candle_close;
                double sl = MathMin(prev_candle_open, entry + max_sl*symbol_info.Point());
-               double tp = iClose(symbol, timeframe, 1); // Last candle close
+               double tp = MathMax(last_candle_close, entry - max_tp*symbol_info.Point()); // Last candle close
                
                if(countPositions() == 0){
                   
