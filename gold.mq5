@@ -23,6 +23,8 @@ input int magic_number = 12345; // EA magic number
 input double size = 0.4; // Size
 input int min_volume = 500;
 input int max_candles_distance = 25;
+input int order_expiration_minutes = 30;
+input int max_sl = 250;
 
 
 // Global variables
@@ -63,11 +65,24 @@ void OnTick() {
    if(this_bar_time != last_bar_time) {
       last_bar_time = this_bar_time;
       
-      string symbol = Symbol();
+      // Remove order if important volume in opposite direction
+      checkOrders();
+      
+      // Set breakeven when price is (entry + TP) / 2
+      setBreakeven();
+      
+      CSymbolInfo symbol_info;
+      symbol_info.Name(symbol);
+      symbol_info.RefreshRates();
       
       int last_vol = iRealVolume(Symbol(), PERIOD_M1, 1);
       
       string last_candle_type = "";
+      double last_candle_open = 0; 
+      double last_candle_close = 0;
+      double last_candle_low = 0; 
+      double last_candle_high = 0;
+            
       if(isBullish(symbol, PERIOD_M1, 1)) {
          last_candle_type = "Bullish";
       }
@@ -75,6 +90,12 @@ void OnTick() {
          last_candle_type = "Bearish";
       }
       
+      if(last_candle_type != "") {
+         last_candle_open = iOpen(symbol, timeframe, 1); 
+         last_candle_close = iClose(symbol, timeframe, 1);
+         last_candle_low = iLow(symbol, timeframe, 1); 
+         last_candle_high = iHigh(symbol, timeframe, 1);
+      }
       
       // -------- BUY --------- 
       if(last_candle_type == "Bullish" && last_vol > min_volume) {
@@ -90,18 +111,20 @@ void OnTick() {
             double prev_candle_low = iLow(symbol, timeframe, prev_candle_idx); // Bullish
             double prev_candle_high = iHigh(symbol, timeframe, prev_candle_idx); // Bullish
             
-            double entry = (prev_candle_high + prev_candle_close) / 2.0;
-            double sl = prev_candle_open;
-            double tp = iClose(symbol, timeframe, 1); // Last candle close
-            
-            placeBuyLimit(symbol, 1, entry, sl, tp, "");
+            if(prev_candle_close < iOpen(symbol, timeframe, 1)) {
+               double entry = (prev_candle_high + prev_candle_close) / 2.0;
+               double sl = MathMax(prev_candle_open, entry - max_sl*symbol_info.Point());
+               double tp = iClose(symbol, timeframe, 1); // Last candle close
+               
+               placeBuyLimit(symbol, size, entry, sl, tp, "");
+            }
          }
       }
     
       // -------- SELL ----------
       if(last_candle_type == "Bearish" && last_vol > min_volume) {
       
-         // Busco otra bullish anterior
+         // Busco otra bearish anterior
          int prev_candle_idx = searchPrevCandle(symbol, timeframe, max_candles_distance, last_candle_type);
          
          if(prev_candle_idx > 2) {
@@ -112,11 +135,14 @@ void OnTick() {
             double prev_candle_low = iLow(symbol, timeframe, prev_candle_idx); // Bearish
             double prev_candle_high = iHigh(symbol, timeframe, prev_candle_idx); // Bearish
             
-            double entry = (prev_candle_low + prev_candle_close) / 2.0;
-            double sl = prev_candle_open;
-            double tp = iClose(symbol, timeframe, 1); // Last candle close
+            if(prev_candle_close > iOpen(symbol, timeframe, 1)) {
             
-            placeSellLimit(symbol, 1, entry, sl, tp, "");
+               double entry = (prev_candle_low + prev_candle_close) / 2.0;
+               double sl = MathMin(prev_candle_open, entry + max_sl*symbol_info.Point());
+               double tp = iClose(symbol, timeframe, 1); // Last candle close
+               
+               placeSellLimit(symbol, size, entry, sl, tp, "");
+            } 
          }
       }
     
@@ -186,6 +212,10 @@ void placeSellLimit(string symbol, double size, double price, double sl, double 
    request.tp = tp;
    request.comment = comment;
    
+   // expiration
+   //request.type_time = ORDER_TIME_SPECIFIED; 
+   //request.expiration = TimeCurrent()+ 60*order_expiration_minutes;
+   
    if(!OrderSend(request,result)){
       Print("Fail to set SELL ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
    } else{
@@ -217,6 +247,9 @@ void placeBuyLimit(string symbol, double size, double price, double sl, double t
    request.tp = tp;
    request.comment = comment;
    
+   //request.type_time = ORDER_TIME_SPECIFIED; 
+   //request.expiration = TimeCurrent()+ 60*order_expiration_minutes;
+   
    if(!OrderSend(request,result)){
       Print("Fail to set BUY ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
    } else{
@@ -224,3 +257,105 @@ void placeBuyLimit(string symbol, double size, double price, double sl, double t
    }
      
 }
+
+void cancelOrder(ulong ticket){
+   MqlTradeRequest request = {};
+   MqlTradeResult  result = {};
+   
+   request.action = TRADE_ACTION_REMOVE;
+   request.order  = ticket;
+   ResetLastError();
+   if(!OrderSend(request,result)){
+      Print("Fail to delete ticket ", request.order,": Error ",GetLastError(),", retcode = ",result.retcode);
+   } else {
+      Print("Order cancelled. Opposite big volume");
+   }
+}
+
+void checkOrders(){
+
+   Print("Checking orders");
+   COrderInfo ord_info;	
+   int last_vol = iRealVolume(Symbol(), PERIOD_M1, 1);
+   
+   for (int i = 0; i < OrdersTotal(); i++) {
+      if(ord_info.SelectByIndex(i) == false ) {
+         Print("ERROR - Unable to select the order - ",GetLastError());
+         break;
+      } 
+      
+      if(ord_info.Type() == ORDER_TYPE_BUY_LIMIT) {
+         if(isBearish(symbol, PERIOD_M1, 1) && last_vol >= min_volume/2) {
+            cancelOrder(ord_info.Ticket());
+         }
+      }
+      
+      if(ord_info.Type() == ORDER_TYPE_SELL_LIMIT) {
+         if(isBullish(symbol, PERIOD_M1, 1) && last_vol >= min_volume/2) {
+            cancelOrder(ord_info.Ticket());
+         }
+      }
+   }
+}
+
+void setBreakeven() {
+   CPositionInfo pos_info;
+   MqlTradeRequest request;
+   MqlTradeResult  result;
+   
+   CSymbolInfo symbol;
+                  
+   for(int i = PositionsTotal()-1; i >= 0; i--){
+      if(pos_info.SelectByIndex(i) && pos_info.Magic() == magic_number) {
+            //int res = OrderDelete(OrderTicket());
+            CSymbolInfo symbol_info;
+            symbol_info.Name(Symbol());
+            symbol_info.RefreshRates();
+                  
+            if(pos_info.Type() == POSITION_TYPE_BUY) {
+               double treshold = (pos_info.PriceOpen() + pos_info.TakeProfit()) / 2;
+               
+               if(symbol_info.Bid() >= treshold) {
+   
+                  //--- setting the operation parameters
+                  request.action= TRADE_ACTION_SLTP;// type of trade operation
+                  request.position= pos_info.Ticket();         // ticket of the position
+                  request.symbol= pos_info.Symbol();         // symbol 
+                  request.sl  = pos_info.PriceOpen();      // Stop Loss of the position
+                  request.tp = pos_info.TakeProfit();
+                  
+                  //--- send the request
+                  if(!OrderSend(request,result)) {
+                     Print("Current price: ", pos_info.PriceCurrent());
+                     printf("OrderSend error %d",GetLastError());  // if unable to send the request, output the error code
+                  } else{
+                     Print("Breakeven set");
+                  }
+               }
+            }
+            
+            if(pos_info.Type() == POSITION_TYPE_SELL) {
+               double treshold = (pos_info.PriceOpen() + pos_info.TakeProfit()) / 2;
+               
+               if(symbol_info.Bid() <= treshold) {
+               
+                  //--- setting the operation parameters
+                  request.action= TRADE_ACTION_SLTP;// type of trade operation
+                  request.position= pos_info.Ticket();         // ticket of the position
+                  request.symbol= pos_info.Symbol();         // symbol 
+                  request.sl  = pos_info.PriceOpen();      // Stop Loss of the position
+                  request.tp = pos_info.TakeProfit();
+                  
+                  //--- send the request
+                  if(!OrderSend(request,result)) {
+                     Print("Current price: ", pos_info.PriceCurrent());
+                     printf("OrderSend error %d",GetLastError());  // if unable to send the request, output the error code
+                  } else{
+                     Print("Breakeven set");
+                  }
+               }
+            }
+      }
+   }
+}
+
