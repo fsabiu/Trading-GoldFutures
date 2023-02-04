@@ -24,7 +24,9 @@ input double size = 0.4; // Size
 input int min_volume = 500;
 input int max_candles_distance = 25;
 input int order_expiration_minutes = 30;
-input int max_sl = 250;
+input int max_sl = 250; // Max SL pips
+input int min_candle_dist = 5; // Min candle distance (mins)
+input bool breakeven = false;
 
 
 // Global variables
@@ -69,7 +71,9 @@ void OnTick() {
       checkOrders();
       
       // Set breakeven when price is (entry + TP) / 2
-      setBreakeven();
+      if(breakeven) {
+         setBreakeven();
+      }
       
       CSymbolInfo symbol_info;
       symbol_info.Name(symbol);
@@ -103,7 +107,7 @@ void OnTick() {
          // Busco otra bullish anterior
          int prev_candle_idx = searchPrevCandle(symbol, timeframe, max_candles_distance, last_candle_type);
          
-         if(prev_candle_idx > 2) {
+         if(prev_candle_idx > min_candle_dist) {
             Print("Bullish signal!!!! Last + ", prev_candle_idx + " th.");
             
             double prev_candle_open = iOpen(symbol, timeframe, prev_candle_idx); // Bullish
@@ -111,8 +115,8 @@ void OnTick() {
             double prev_candle_low = iLow(symbol, timeframe, prev_candle_idx); // Bullish
             double prev_candle_high = iHigh(symbol, timeframe, prev_candle_idx); // Bullish
             
-            if(prev_candle_close < iOpen(symbol, timeframe, 1)) {
-               double entry = (prev_candle_high + prev_candle_close) / 2.0;
+            if(prev_candle_high < last_candle_high) {
+               double entry = prev_candle_close;
                double sl = MathMax(prev_candle_open, entry - max_sl*symbol_info.Point());
                double tp = iClose(symbol, timeframe, 1); // Last candle close
                
@@ -127,7 +131,7 @@ void OnTick() {
          // Busco otra bearish anterior
          int prev_candle_idx = searchPrevCandle(symbol, timeframe, max_candles_distance, last_candle_type);
          
-         if(prev_candle_idx > 2) {
+         if(prev_candle_idx > min_candle_dist) {
             Print("Bearish signal!!!! Last + ", prev_candle_idx + " th.");
             
             double prev_candle_open = iOpen(symbol, timeframe, prev_candle_idx); // Bearish
@@ -135,9 +139,9 @@ void OnTick() {
             double prev_candle_low = iLow(symbol, timeframe, prev_candle_idx); // Bearish
             double prev_candle_high = iHigh(symbol, timeframe, prev_candle_idx); // Bearish
             
-            if(prev_candle_close > iOpen(symbol, timeframe, 1)) {
+            if(prev_candle_low > last_candle_low) {
             
-               double entry = (prev_candle_low + prev_candle_close) / 2.0;
+               double entry = prev_candle_close;
                double sl = MathMin(prev_candle_open, entry + max_sl*symbol_info.Point());
                double tp = iClose(symbol, timeframe, 1); // Last candle close
                
@@ -285,13 +289,13 @@ void checkOrders(){
       } 
       
       if(ord_info.Type() == ORDER_TYPE_BUY_LIMIT) {
-         if(isBearish(symbol, PERIOD_M1, 1) && last_vol >= min_volume/2) {
+         if(isBearish(Symbol(), PERIOD_M1, 1) && last_vol >= min_volume/2) {
             cancelOrder(ord_info.Ticket());
          }
       }
       
       if(ord_info.Type() == ORDER_TYPE_SELL_LIMIT) {
-         if(isBullish(symbol, PERIOD_M1, 1) && last_vol >= min_volume/2) {
+         if(isBullish(Symbol(), PERIOD_M1, 1) && last_vol >= min_volume/2) {
             cancelOrder(ord_info.Ticket());
          }
       }
