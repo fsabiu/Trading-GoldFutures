@@ -38,6 +38,11 @@ bool exact=false;
 datetime last_bar_time = 0;
 double dynamic_size;
 
+// trend
+int handle_ema1;
+int handle_ema5;
+string trend = "ND";
+
 int OnInit()
   {
 
@@ -47,11 +52,63 @@ int OnInit()
    int bar_index = iBarShift(symbol, timeframe, time, exact);
    last_bar_time = iTime(Symbol(), PERIOD_M1, bar_index);
    
-   Print("Init!!!!");
+   handle_ema1 = iMA(Symbol(), timeframe, 1 , 0, MODE_EMA, PRICE_CLOSE);
+   handle_ema5 = iMA(Symbol(), timeframe, 5 , 0, MODE_EMA, PRICE_CLOSE);
+   
+   
+   if(getEMA1(1) > getEMA5(1)) {
+      trend = "UP";
+   } else {
+      trend = "DOWN";
+   }
+   
+   Print("Init done!");
    return(INIT_SUCCEEDED);
 }
 
+double getEMA1(int n){
+   double ema1[];
+   ArraySetAsSeries(ema1,true);
+   CopyBuffer(handle_ema1, 0, 0, n+1, ema1);
+   
+   return ema1[n];
+}
 
+double getEMA5(int n){
+   double ema5[];
+   ArraySetAsSeries(ema5,true);
+   CopyBuffer(handle_ema5, 0, 0, n+1, ema5);
+   
+   return ema5[n];
+}
+
+// Returns UP if for all the last n candles ema1 >= ema5. Same for DOWN
+string getTrend(int n){
+   
+   string trend = "UP";
+   
+   int i=0;
+   while(i<n && trend=="UP"){
+      if(getEMA1(i) < getEMA5(i)){
+         trend = "ND";
+      }
+      i++;
+   }
+   
+   if(trend == "ND") {
+      
+      trend = "DOWN";
+      i=0;
+      while(i<n && trend=="DOWN"){
+         if(getEMA1(i) > getEMA5(i)){
+            trend = "ND";
+         }
+         i++;
+      }
+   }
+   
+   return trend;
+}
 void OnTick() {
    // Print("TICK");
    
@@ -67,6 +124,13 @@ void OnTick() {
    // New 1 minute bar
    if(this_bar_time != last_bar_time) {
       last_bar_time = this_bar_time;
+      
+      // Set trend
+      if(getEMA1(1) > getEMA5(1)) {
+         trend = "UP";
+      } else {
+         trend = "DOWN";
+      }
       
       // Remove order if important volume in opposite direction
       checkOrders();
@@ -103,7 +167,7 @@ void OnTick() {
       }
       
       // -------- BUY --------- 
-      if(last_candle_type == "Bullish" && last_vol > min_volume) {
+      if(last_candle_type == "Bullish" && last_vol > min_volume && trend == "UP") {
       
          // Busco otra bullish anterior
          int prev_candle_idx = searchPrevCandle(symbol, timeframe, max_candles_distance, last_candle_type);
@@ -116,7 +180,7 @@ void OnTick() {
             double prev_candle_low = iLow(symbol, timeframe, prev_candle_idx); // Bullish
             double prev_candle_high = iHigh(symbol, timeframe, prev_candle_idx); // Bullish
             
-            if(prev_candle_high < last_candle_high) {
+            if(prev_candle_high < last_candle_high && getTrend(prev_candle_idx)=="UP") {
                double entry = prev_candle_close;
                double sl = MathMax(prev_candle_open, entry - max_sl*symbol_info.Point());
                double tp = MathMin(last_candle_close, entry + max_tp*symbol_info.Point()); // Last candle close
@@ -135,7 +199,7 @@ void OnTick() {
       }
     
       // -------- SELL ----------
-      if(last_candle_type == "Bearish" && last_vol > min_volume) {
+      if(last_candle_type == "Bearish" && last_vol > min_volume  && trend == "DOWN") {
       
          // Busco otra bearish anterior
          int prev_candle_idx = searchPrevCandle(symbol, timeframe, max_candles_distance, last_candle_type);
@@ -148,7 +212,7 @@ void OnTick() {
             double prev_candle_low = iLow(symbol, timeframe, prev_candle_idx); // Bearish
             double prev_candle_high = iHigh(symbol, timeframe, prev_candle_idx); // Bearish
             
-            if(prev_candle_low > last_candle_low) {
+            if(prev_candle_low > last_candle_low && getTrend(prev_candle_idx)=="DOWN") {
             
                double entry = prev_candle_close;
                double sl = MathMin(prev_candle_open, entry + max_sl*symbol_info.Point());
@@ -294,7 +358,6 @@ void cancelOrder(ulong ticket){
 
 void checkOrders(){
 
-   Print("Checking orders");
    COrderInfo ord_info;	
    int last_vol = iRealVolume(Symbol(), PERIOD_M1, 1);
    
